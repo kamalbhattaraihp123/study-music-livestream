@@ -31,20 +31,39 @@ jobs:
         echo "First 5 tracks:"
         head -5 playlist.txt
     
-    - name: Resize background image to 1920x1080
+    - name: Prepare background image
       run: |
-        ffmpeg -i backgrounds/ambient-bg.jpg -vf scale=1920:1080 -y ambient-bg-resized.jpg
-        echo "✅ Background image resized"
+        if [ -f backgrounds/ambient-bg.jpg ]; then
+          echo "✅ Found custom background image: backgrounds/ambient-bg.jpg"
+          echo "📐 Resizing to 1920x1080..."
+          ffmpeg -i backgrounds/ambient-bg.jpg \
+            -vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:-1:-1:color=black \
+            -q:v 2 -y ambient-bg-resized.jpg
+          echo "✅ Custom background ready!"
+        else
+          echo "⚠️ No custom background found"
+          echo "🎨 Generating blue ocean gradient background..."
+          ffmpeg -f lavfi \
+            -i "color=c=0x1E3A5F:s=1920x1080:d=1,format=yuv420p" \
+            -frames:v 1 -y ambient-bg-resized.jpg
+          echo "✅ Auto-generated background ready!"
+        fi
+        ls -lh ambient-bg-resized.jpg
     
     - name: Stream to YouTube with Background Image
       env:
         STREAM_KEY: ${{ secrets.AMBIENT_STREAM_KEY }}
       run: |
+        echo "🌊 Starting stream to YouTube..."
+        echo "🖼️ Using background: ambient-bg-resized.jpg"
+        echo "🎵 Music playlist: $(wc -l < playlist.txt) tracks"
+        echo ""
+        
         ffmpeg -loop 1 -framerate 1 -i ambient-bg-resized.jpg \
           -stream_loop -1 -f concat -safe 0 -i playlist.txt \
           -c:v libx264 -preset veryfast -tune stillimage \
           -pix_fmt yuv420p -b:v 1000k -maxrate 1000k -bufsize 2000k \
-          -vf "scale=1920:1080,format=yuv420p" -r 1 \
+          -vf "format=yuv420p" -r 1 \
           -g 50 -keyint_min 50 -sc_threshold 0 \
           -c:a aac -b:a 128k -ar 44100 \
           -f flv rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY
