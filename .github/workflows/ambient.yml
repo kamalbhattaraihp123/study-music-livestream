@@ -3,7 +3,7 @@ name: 🌊 Ambient Nature Sounds 24/7
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours at :00
+    - cron: '0 */6 * * *'
 
 jobs:
   stream-ambient:
@@ -29,30 +29,39 @@ jobs:
         echo "✅ Created playlist with $(wc -l < playlist.txt) tracks"
         head -3 playlist.txt
     
-    - name: Stream to YouTube (Robust Mode)
+    - name: Prepare Background Image
+      run: |
+        echo "🖼️ Processing background image..."
+        
+        if [ -f backgrounds/ambient-bg.jpg ]; then
+          echo "✅ Found: backgrounds/ambient-bg.jpg"
+          
+          ffmpeg -i backgrounds/ambient-bg.jpg \
+            -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
+            -q:v 2 -frames:v 1 -y bg.jpg
+          
+          echo "✅ Background ready!"
+          ls -lh bg.jpg
+        else
+          echo "❌ Image not found, creating blue gradient..."
+          ffmpeg -f lavfi -i "color=c=#1E3A5F:s=1920x1080:d=1,format=yuv420p" \
+            -frames:v 1 -y bg.jpg
+        fi
+    
+    - name: Stream to YouTube with Background
       env:
         STREAM_KEY: ${{ secrets.AMBIENT_STREAM_KEY }}
       run: |
-        echo "🌊 Starting robust 24/7 stream..."
-        echo "⏰ Will run for 6 hours before auto-restart"
+        echo "🌊 Starting stream with BACKGROUND IMAGE..."
+        echo "🖼️ Using: bg.jpg"
+        echo "🎵 Tracks: $(wc -l < playlist.txt)"
         echo ""
         
-        # Stream with reconnection and error handling
-        ffmpeg -hide_banner -loglevel warning -stats \
+        ffmpeg -hide_banner \
+          -loop 1 -framerate 1 -i bg.jpg \
           -stream_loop -1 -f concat -safe 0 -re -i playlist.txt \
-          -filter_complex "[0:a]showwaves=s=1920x1080:mode=cline:colors=#3366FF|#66CCFF:scale=sqrt,format=yuv420p[v]" \
-          -map "[v]" -map 0:a \
-          -c:v libx264 -preset veryfast -b:v 1500k -maxrate 1500k -bufsize 3000k \
-          -g 50 -keyint_min 50 -sc_threshold 0 \
+          -c:v libx264 -preset ultrafast -tune stillimage \
+          -pix_fmt yuv420p -b:v 1000k -maxrate 1000k -bufsize 2000k \
+          -r 1 -g 50 -keyint_min 50 -sc_threshold 0 \
           -c:a aac -b:a 128k -ar 44100 \
-          -f flv \
-          -flvflags no_duration_filesize \
-          -reconnect 1 \
-          -reconnect_at_eof 1 \
-          -reconnect_streamed 1 \
-          -reconnect_delay_max 10 \
-          "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" \
-          || echo "⚠️ Stream ended (exit code: $?)"
-        
-        echo ""
-        echo "✅ 6-hour session completed. Next auto-restart in ~10 minutes."
+          -f flv "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
