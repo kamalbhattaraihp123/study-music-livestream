@@ -1,14 +1,14 @@
 name: 🌊 Ambient Nature Sounds 24/7
 
 on:
-  workflow_dispatch:  # Manual start button
+  workflow_dispatch:
   schedule:
-    - cron: '10 */6 * * *'  # Auto-restart every 6 hours
+    - cron: '10 */6 * * *'
 
 jobs:
   stream-ambient:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours
+    timeout-minutes: 360
     
     steps:
     - name: Checkout repository
@@ -22,30 +22,24 @@ jobs:
     - name: Create shuffled playlist
       run: |
         echo "🌊 Creating ambient playlist..."
-        
-        # List all ambient tracks
         for file in music/ambient/*.mp3; do
           echo "file '$file'" >> temp.txt
         done
-        
-        # Shuffle the playlist
         shuf temp.txt > playlist.txt
-        
-        # Show info
         echo "📋 Playlist created with $(wc -l < playlist.txt) tracks"
         echo ""
-        echo "First 5 tracks in this session:"
+        echo "First 5 tracks:"
         head -5 playlist.txt
     
-    - name: Stream to YouTube with Background
+    - name: Stream to YouTube with Audio Visualizer
       env:
         STREAM_KEY: ${{ secrets.AMBIENT_STREAM_KEY }}
       run: |
-        ffmpeg -loop 1 -framerate 1 -i backgrounds/ambient-bg.jpg \
-          -stream_loop -1 -f concat -safe 0 -i playlist.txt \
-          -c:v libx264 -preset veryfast -tune stillimage \
-          -pix_fmt yuv420p -b:v 1000k -maxrate 1000k -bufsize 2000k \
-          -vf "scale=1920:1080,format=yuv420p" -r 1 \
+        ffmpeg -stream_loop -1 -f concat -safe 0 -i playlist.txt \
+          -filter_complex "[0:a]showwaves=s=1920x1080:mode=cline:colors=#3366FF|#66CCFF:scale=sqrt,format=yuv420p[v]" \
+          -map "[v]" -map 0:a \
+          -c:v libx264 -preset veryfast -b:v 1500k \
+          -maxrate 1500k -bufsize 3000k \
           -g 50 -keyint_min 50 -sc_threshold 0 \
           -c:a aac -b:a 128k -ar 44100 \
           -f flv rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY
