@@ -31,15 +31,20 @@ jobs:
         echo "First 5 tracks:"
         head -5 playlist.txt
     
-    - name: Stream to YouTube with Audio Visualizer
+    - name: Resize background image to 1920x1080
+      run: |
+        ffmpeg -i backgrounds/ambient-bg.jpg -vf scale=1920:1080 -y ambient-bg-resized.jpg
+        echo "✅ Background image resized"
+    
+    - name: Stream to YouTube with Background Image
       env:
         STREAM_KEY: ${{ secrets.AMBIENT_STREAM_KEY }}
       run: |
-        ffmpeg -stream_loop -1 -f concat -safe 0 -i playlist.txt \
-          -filter_complex "[0:a]showwaves=s=1920x1080:mode=cline:colors=#3366FF|#66CCFF:scale=sqrt,format=yuv420p[v]" \
-          -map "[v]" -map 0:a \
-          -c:v libx264 -preset veryfast -b:v 1500k \
-          -maxrate 1500k -bufsize 3000k \
+        ffmpeg -loop 1 -framerate 1 -i ambient-bg-resized.jpg \
+          -stream_loop -1 -f concat -safe 0 -i playlist.txt \
+          -c:v libx264 -preset veryfast -tune stillimage \
+          -pix_fmt yuv420p -b:v 1000k -maxrate 1000k -bufsize 2000k \
+          -vf "scale=1920:1080,format=yuv420p" -r 1 \
           -g 50 -keyint_min 50 -sc_threshold 0 \
           -c:a aac -b:a 128k -ar 44100 \
           -f flv rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY
