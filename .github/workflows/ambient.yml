@@ -1,17 +1,17 @@
-name: 🎹 Lofi Study Music
+name: 🌊 Ambient Nature Sounds 24/7
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Manual start button
   schedule:
-    - cron: '0 */5 * * *'
+    - cron: '10 */6 * * *'  # Auto-restart every 6 hours
 
 jobs:
-  stream:
+  stream-ambient:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 360  # 6 hours
     
     steps:
-    - name: Checkout
+    - name: Checkout repository
       uses: actions/checkout@v3
     
     - name: Install FFmpeg
@@ -21,22 +21,31 @@ jobs:
     
     - name: Create shuffled playlist
       run: |
-        for file in music/lofi/*.mp3; do
+        echo "🌊 Creating ambient playlist..."
+        
+        # List all ambient tracks
+        for file in music/ambient/*.mp3; do
           echo "file '$file'" >> temp.txt
         done
+        
+        # Shuffle the playlist
         shuf temp.txt > playlist.txt
-        echo "🎵 Playing:"
-        cat playlist.txt
+        
+        # Show info
+        echo "📋 Playlist created with $(wc -l < playlist.txt) tracks"
+        echo ""
+        echo "First 5 tracks in this session:"
+        head -5 playlist.txt
     
-    - name: Stream
+    - name: Stream to YouTube with Background
       env:
-        STREAM_KEY: ${{ secrets.LOFI_STREAM_KEY }}
+        STREAM_KEY: ${{ secrets.AMBIENT_STREAM_KEY }}
       run: |
-        ffmpeg -loop 1 -framerate 1 -i backgrounds/lofi-bg.jpg \
+        ffmpeg -loop 1 -framerate 1 -i backgrounds/ambient-bg.jpg \
           -stream_loop -1 -f concat -safe 0 -i playlist.txt \
           -c:v libx264 -preset veryfast -tune stillimage \
-          -pix_fmt yuv420p -b:v 800k -maxrate 800k -bufsize 1600k \
-          -vf "scale=1920:1080" -r 1 \
-          -g 50 -sc_threshold 0 \
+          -pix_fmt yuv420p -b:v 1000k -maxrate 1000k -bufsize 2000k \
+          -vf "scale=1920:1080,format=yuv420p" -r 1 \
+          -g 50 -keyint_min 50 -sc_threshold 0 \
           -c:a aac -b:a 128k -ar 44100 \
           -f flv rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY
