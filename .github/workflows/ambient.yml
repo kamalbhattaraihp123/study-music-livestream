@@ -18,6 +18,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y ffmpeg
+        ffmpeg -version | head -1
     
     - name: Create shuffled playlist
       run: |
@@ -26,7 +27,8 @@ jobs:
           echo "file '$file'" >> temp.txt
         done
         shuf temp.txt > playlist.txt
-        echo "✅ Created playlist with $(wc -l < playlist.txt) tracks"
+        TRACK_COUNT=$(wc -l < playlist.txt)
+        echo "✅ Created playlist with $TRACK_COUNT tracks"
         head -3 playlist.txt
     
     - name: Prepare Background Image
@@ -37,31 +39,52 @@ jobs:
           echo "✅ Found: backgrounds/ambient-bg.jpg"
           
           ffmpeg -i backgrounds/ambient-bg.jpg \
-            -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
+            -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p" \
             -q:v 2 -frames:v 1 -y bg.jpg
           
           echo "✅ Background ready!"
           ls -lh bg.jpg
         else
-          echo "❌ Image not found, creating blue gradient..."
+          echo "⚠️ Creating fallback gradient..."
           ffmpeg -f lavfi -i "color=c=#1E3A5F:s=1920x1080:d=1,format=yuv420p" \
             -frames:v 1 -y bg.jpg
         fi
     
-    - name: Stream to YouTube with Background
+    - name: Stream to YouTube (Robust Mode with Auto-Reconnect)
       env:
         STREAM_KEY: ${{ secrets.AMBIENT_STREAM_KEY }}
       run: |
-        echo "🌊 Starting stream with BACKGROUND IMAGE..."
-        echo "🖼️ Using: bg.jpg"
+        echo "🌊 Starting robust 24/7 stream..."
+        echo "🖼️ Background: bg.jpg"
         echo "🎵 Tracks: $(wc -l < playlist.txt)"
+        echo "⏰ Will run for 6 hours with auto-reconnect"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
         
-        ffmpeg -hide_banner \
-          -loop 1 -framerate 1 -i bg.jpg \
-          -stream_loop -1 -f concat -safe 0 -re -i playlist.txt \
-          -c:v libx264 -preset ultrafast -tune stillimage \
-          -pix_fmt yuv420p -b:v 1000k -maxrate 1000k -bufsize 2000k \
-          -r 1 -g 50 -keyint_min 50 -sc_threshold 0 \
-          -c:a aac -b:a 128k -ar 44100 \
-          -f flv "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
+        # Stream with aggressive reconnection settings
+        ffmpeg -hide_banner -loglevel warning -stats \
+          -re -loop 1 -r 30 -i bg.jpg \
+          -stream_loop -1 -f concat -safe 0 -i playlist.txt \
+          -c:v libx264 -preset veryfast -profile:v high -level 4.2 \
+          -pix_fmt yuv420p \
+          -b:v 2500k -maxrate 2500k -bufsize 5000k \
+          -r 30 -g 60 -keyint_min 60 -sc_threshold 0 \
+          -c:a aac -b:a 128k -ar 44100 -ac 2 \
+          -f flv \
+          -flvflags no_duration_filesize \
+          -reconnect 1 \
+          -reconnect_at_eof 1 \
+          -reconnect_streamed 1 \
+          -reconnect_delay_max 5 \
+          -tcp_nodelay 1 \
+          -timeout 10000000 \
+          "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" \
+          || EXIT_CODE=$?
+        
+        echo ""
+        if [ -z "$EXIT_CODE" ] || [ "$EXIT_CODE" -eq 255 ]; then
+          echo "✅ Stream completed normally (6 hour session)"
+        else
+          echo "⚠️ Stream ended with exit code: $EXIT_CODE"
+          echo "Will auto-restart in next cron cycle"
+        fi
