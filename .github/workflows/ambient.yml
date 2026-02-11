@@ -18,118 +18,39 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y ffmpeg
-        echo "✅ FFmpeg installed"
-    
-    - name: Verify files exist
-      run: |
-        echo "📁 Checking music files..."
-        ls music/ambient/*.mp3 | head -5
-        TRACK_COUNT=$(ls music/ambient/*.mp3 | wc -l)
-        echo "✅ Found $TRACK_COUNT music files"
-        
-        echo ""
-        echo "📁 Checking background..."
-        ls -lh backgrounds/ambient-bg.jpg || echo "⚠️ No background image"
     
     - name: Create shuffled playlist
       run: |
-        echo "🎵 Creating playlist..."
         for file in music/ambient/*.mp3; do
           echo "file '$file'" >> temp.txt
         done
         shuf temp.txt > playlist.txt
-        echo "✅ Created playlist with $(wc -l < playlist.txt) tracks"
+        echo "✅ Playlist: $(wc -l < playlist.txt) tracks"
     
     - name: Prepare background image
       run: |
-        echo "🖼️ Preparing background..."
-        
         if [ -f backgrounds/ambient-bg.jpg ]; then
-          echo "✅ Found custom background"
           ffmpeg -i backgrounds/ambient-bg.jpg \
             -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p" \
             -q:v 2 -frames:v 1 -y bg.jpg
         else
-          echo "⚠️ Creating blue gradient..."
           ffmpeg -f lavfi -i "color=c=#1E3A5F:s=1920x1080:d=1,format=yuv420p" \
             -frames:v 1 -y bg.jpg
         fi
-        
-        ls -lh bg.jpg
-        echo "✅ Background ready"
     
-    - name: Verify stream key exists
+    - name: Stream to YouTube (Higher Bitrate)
       env:
         STREAM_KEY: ${{ secrets.AMBIENT_STREAM_KEY }}
       run: |
-        echo "🔐 Checking stream key..."
-        if [ -z "$STREAM_KEY" ]; then
-          echo "❌ ERROR: AMBIENT_STREAM_KEY is empty!"
-          echo "Please add your YouTube stream key to GitHub Secrets"
-          exit 1
-        fi
-        KEY_LENGTH=${#STREAM_KEY}
-        echo "✅ Stream key exists (length: $KEY_LENGTH characters)"
+        echo "🌊 Starting stream with YouTube-recommended bitrate..."
         
-        if [ $KEY_LENGTH -lt 10 ]; then
-          echo "❌ ERROR: Stream key seems too short!"
-          exit 1
-        fi
-        echo "✅ Stream key looks valid"
-    
-    - name: Start streaming to YouTube (2 hours)
-      env:
-        STREAM_KEY: ${{ secrets.AMBIENT_STREAM_KEY }}
-      run: |
-        echo "🌊 Starting 2-hour stream..."
-        echo "🖼️ Background: bg.jpg"
-        echo "🎵 Tracks: $(wc -l < playlist.txt)"
-        echo "⏰ Duration: 2 hours"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "If this fails immediately, your stream key may be wrong!"
-        echo ""
-        
-        # Run FFmpeg and capture output
-        ffmpeg -hide_banner -loglevel info \
+        ffmpeg -hide_banner -loglevel warning -stats \
           -re -loop 1 -r 30 -i bg.jpg \
           -stream_loop -1 -f concat -safe 0 -i playlist.txt \
           -c:v libx264 -preset veryfast -profile:v high \
           -pix_fmt yuv420p \
-          -b:v 2500k -maxrate 2500k -bufsize 5000k \
+          -b:v 4500k -maxrate 4500k -bufsize 9000k \
           -r 30 -g 60 -keyint_min 60 -sc_threshold 0 \
-          -c:a aac -b:a 128k -ar 44100 -ac 2 \
+          -c:a aac -b:a 160k -ar 44100 -ac 2 \
           -f flv \
-          "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" 2>&1 | head -100 &
-        
-        FFMPEG_PID=$!
-        
-        # Wait a bit and check if FFmpeg is still running
-        sleep 30
-        
-        if kill -0 $FFMPEG_PID 2>/dev/null; then
-          echo ""
-          echo "✅ Stream started successfully!"
-          echo "✅ FFmpeg is running (PID: $FFMPEG_PID)"
-          echo "✅ Check YouTube Studio - should show LIVE"
-          echo ""
-          echo "Streaming for 2 hours..."
-          
-          # Wait for the rest of the 2 hours
-          wait $FFMPEG_PID || true
-          echo "✅ Stream session completed"
-        else
-          echo ""
-          echo "❌ ERROR: FFmpeg stopped within 30 seconds!"
-          echo ""
-          echo "Possible causes:"
-          echo "1. Stream key is wrong or expired"
-          echo "2. YouTube stream is not active"
-          echo "3. Network connection issue"
-          echo ""
-          echo "Please:"
-          echo "1. Create a NEW stream in YouTube Studio"
-          echo "2. Copy the NEW stream key"
-          echo "3. Update AMBIENT_STREAM_KEY in GitHub Secrets"
-          exit 1
-        fi
+          "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
